@@ -1,5 +1,71 @@
 <!DOCTYPE html>
 <html>
+
+
+
+
+
+<style>
+  /* контейнер поверх всего, но не мешает кликам по canvas */
+  #ui {
+    position: fixed;
+    inset: 0;                 /* растянут на весь экран */
+    pointer-events: none;     /* прозрачный для кликов */
+    z-index: 10;              /* поверх canvas */
+  }
+
+  /* сами кнопки */
+  #ui .btn-tri {
+    pointer-events: auto;     /* кликабельны */
+    position: absolute;
+    top: 50%;                 /* по вертикали — центр */
+    transform: translateY(-50%);  /* сдвиг вверх на половину своей высоты → ровно центр */
+    width: 56px;
+    height: 56px;
+    border: none;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.12);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  #ui .btn-tri:active { background: rgba(255,255,255,0.25); }
+
+  /* прижимаем к бокам */
+  #prev { left: 16px; }
+  #next { right: 16px; }
+</style>
+
+<div id="ui">
+  <button class="btn-tri" id="prev">
+    <svg viewBox="0 0 24 24" width="28" height="28">
+      <polygon points="16,4 6,12 16,20" fill="white"/>
+    </svg>
+  </button>
+
+  <button class="btn-tri" id="next">
+    <svg viewBox="0 0 24 24" width="28" height="28">
+      <polygon points="8,4 18,12 8,20" fill="white"/>
+    </svg>
+  </button>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <body style="margin:0; overflow:hidden">
 <script type="importmap">
 { "imports": {
@@ -17,32 +83,55 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// --- ШАР + ШЕЙДЕР ---
-const geo = new THREE.SphereGeometry(1, 64, 64);
 
-const mat = new THREE.ShaderMaterial({
-  uniforms: {
-    uTime: { value: 0 }
-  },
-  vertexShader: /* glsl */`
-    varying vec3 vNormal;
-    varying vec3 vPos;
+
+
+
+
+
+
+
+import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+
+const loader = new FontLoader();
+
+
+
+
+
+
+
+
+
+
+
+
+
+const default_vs = `
+varying vec3 vNormal;
+varying vec3 vPos;
     
     
-    
-    
-    
-    
-    
-    
-    
-    void main() {
-      vNormal = normalize(normalMatrix * normal);
-      vPos = position;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: /* glsl */`
+void main() {
+  vNormal = normalize(normalMatrix * normal);
+  vPos = position;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+
+
+
+
+
+
+
+
+
+
+
+const sun_fs = /* glsl */`
     uniform float uTime;
     varying vec3 vNormal;
     varying vec3 vPos;
@@ -108,29 +197,721 @@ float voronoi3D(vec3 wc) {
     void main() {
       
       
-      float n = voronoi3D(vPos*10.0 + uTime);
+      float n = voronoi3D(vPos*13.5 + uTime);
       
       
       vec3 color = mix( vec3(0.82, 0.27, 0), vec3(0.9, 0.8, 0), n);
       
       gl_FragColor = vec4(color, 1.0);
     }
-  `
+`;
+
+
+
+
+
+
+
+
+const earth_fs = /* glsl */`
+    uniform float uTime;
+    varying vec3 vNormal;
+    varying vec3 vPos;
+
+
+
+
+
+
+
+
+vec3 Hash3(vec3 p) {
+    p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
+             dot(p, vec3(269.5, 183.3, 246.1)),
+             dot(p, vec3(113.5, 271.9, 124.6)));
+    return fract(sin(p) * 43758.5453);
+}
+
+
+
+
+
+
+
+
+
+
+
+float voronoi3D(vec3 wc) {
+	vec3 cell = floor(wc);
+	vec3 loc = fract(wc);
+
+	float minDist = 100.0;
+
+
+	for (int y=-1; y <= 1; y++) {
+		for (int x=-1; x <= 1; x++) {
+			for (int z=-1; z <= 1; z++) {
+				vec3 pos = cell + vec3(x, y, z);
+				vec3 wpos = pos + Hash3(pos);
+
+				float dist = distance(wpos, wc);
+
+
+
+				minDist = min(minDist, dist);
+			}
+		}
+	}
+
+	return minDist;
+}
+    
+
+
+
+
+
+
+
+
+
+
+
+
+// 3D Perlin noise (Ashima Arts / Stefan Gustavson)
+// Возвращает значение примерно в диапазоне [-1, 1]
+
+vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 permute(vec4 x) { return mod289(((x * 34.0) + 1.0) * x); }
+vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+float snoise(vec3 v) {
+    const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
+    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+
+    // Первая угловая точка
+    vec3 i  = floor(v + dot(v, C.yyy));
+    vec3 x0 = v - i + dot(i, C.xxx);
+
+    // Другие углы
+    vec3 g  = step(x0.yzx, x0.xyz);
+    vec3 l  = 1.0 - g;
+    vec3 i1 = min(g.xyz, l.zxy);
+    vec3 i2 = max(g.xyz, l.zxy);
+
+    vec3 x1 = x0 - i1 + C.xxx;
+    vec3 x2 = x0 - i2 + C.yyy;
+    vec3 x3 = x0 - D.yyy;
+
+    // Перестановки
+    i = mod289(i);
+    vec4 p = permute(permute(permute(
+                 i.z + vec4(0.0, i1.z, i2.z, 1.0))
+               + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+               + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+
+    // Градиенты: 7x7 точек на плоскости, отображённых в 3D
+    float n_ = 0.142857142857; // 1/7
+    vec3 ns = n_ * D.wyz - D.xzx;
+
+    vec4 j  = p - 49.0 * floor(p * ns.z * ns.z);
+
+    vec4 x_ = floor(j * ns.z);
+    vec4 y_ = floor(j - 7.0 * x_);
+
+    vec4 x = x_ * ns.x + ns.yyyy;
+    vec4 y = y_ * ns.x + ns.yyyy;
+    vec4 h = 1.0 - abs(x) - abs(y);
+
+    vec4 b0 = vec4(x.xy, y.xy);
+    vec4 b1 = vec4(x.zw, y.zw);
+
+    vec4 s0 = floor(b0) * 2.0 + 1.0;
+    vec4 s1 = floor(b1) * 2.0 + 1.0;
+    vec4 sh = -step(h, vec4(0.0));
+
+    vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
+    vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
+
+    vec3 p0 = vec3(a0.xy, h.x);
+    vec3 p1 = vec3(a0.zw, h.y);
+    vec3 p2 = vec3(a1.xy, h.z);
+    vec3 p3 = vec3(a1.zw, h.w);
+
+    // Нормализация градиентов
+    vec4 norm = taylorInvSqrt(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
+    p0 *= norm.x;
+    p1 *= norm.y;
+    p2 *= norm.z;
+    p3 *= norm.w;
+
+    // Смешивание вкладов
+    vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
+    m = m * m;
+    return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+    void main() {
+      
+      
+      float n = (snoise(vPos*3.0)+1.0) /2.0;
+      
+      
+      vec3 color;
+      if (n < 0.26) {
+         color = mix( vec3(0, 0.1, 0.6), vec3(0, 0.44, 0.82), n/0.4);
+         
+         float vn = voronoi3D(vPos*30.0+uTime);
+         color = mix(color, vec3(0.77, 0.77, 0.97), pow(vn, 2.0));
+      }
+      
+      else if (n < 0.37) color = mix( vec3(0.84, 0.7, 0), vec3(0.62, 0.5, 0), (n-0.26)/(0.37-0.26));
+      
+      
+      else if (n < 0.6) color = mix( vec3(0, 0.8, 0.3), vec3(0, 0.6, 0.06), (n-0.37)/(0.6-0.37));
+      
+      else if (n < 0.86) color = mix( vec3(0.6), vec3(0.2), (n-0.6)/(0.86-0.6));
+      
+      else color = mix( vec3(0.64), vec3(1), (n-0.86)/(1.0-0.86));
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      // color = mix( vec3(0.82, 0.27, 0), vec3(0.9, 0.8, 0), n);
+      
+      gl_FragColor = vec4(color, 1.0);
+    }
+`;
+
+
+
+
+
+
+
+const earth_vs = `
+varying vec3 vNormal;
+varying vec3 vPos;
+
+
+
+
+
+
+
+// 3D Perlin noise (Ashima Arts / Stefan Gustavson)
+// Возвращает значение примерно в диапазоне [-1, 1]
+
+vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 permute(vec4 x) { return mod289(((x * 34.0) + 1.0) * x); }
+vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+float snoise(vec3 v) {
+    const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
+    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+
+    // Первая угловая точка
+    vec3 i  = floor(v + dot(v, C.yyy));
+    vec3 x0 = v - i + dot(i, C.xxx);
+
+    // Другие углы
+    vec3 g  = step(x0.yzx, x0.xyz);
+    vec3 l  = 1.0 - g;
+    vec3 i1 = min(g.xyz, l.zxy);
+    vec3 i2 = max(g.xyz, l.zxy);
+
+    vec3 x1 = x0 - i1 + C.xxx;
+    vec3 x2 = x0 - i2 + C.yyy;
+    vec3 x3 = x0 - D.yyy;
+
+    // Перестановки
+    i = mod289(i);
+    vec4 p = permute(permute(permute(
+                 i.z + vec4(0.0, i1.z, i2.z, 1.0))
+               + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+               + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+
+    // Градиенты: 7x7 точек на плоскости, отображённых в 3D
+    float n_ = 0.142857142857; // 1/7
+    vec3 ns = n_ * D.wyz - D.xzx;
+
+    vec4 j  = p - 49.0 * floor(p * ns.z * ns.z);
+
+    vec4 x_ = floor(j * ns.z);
+    vec4 y_ = floor(j - 7.0 * x_);
+
+    vec4 x = x_ * ns.x + ns.yyyy;
+    vec4 y = y_ * ns.x + ns.yyyy;
+    vec4 h = 1.0 - abs(x) - abs(y);
+
+    vec4 b0 = vec4(x.xy, y.xy);
+    vec4 b1 = vec4(x.zw, y.zw);
+
+    vec4 s0 = floor(b0) * 2.0 + 1.0;
+    vec4 s1 = floor(b1) * 2.0 + 1.0;
+    vec4 sh = -step(h, vec4(0.0));
+
+    vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
+    vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
+
+    vec3 p0 = vec3(a0.xy, h.x);
+    vec3 p1 = vec3(a0.zw, h.y);
+    vec3 p2 = vec3(a1.xy, h.z);
+    vec3 p3 = vec3(a1.zw, h.w);
+
+    // Нормализация градиентов
+    vec4 norm = taylorInvSqrt(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
+    p0 *= norm.x;
+    p1 *= norm.y;
+    p2 *= norm.z;
+    p3 *= norm.w;
+
+    // Смешивание вкладов
+    vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
+    m = m * m;
+    return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
+}
+
+
+
+
+
+
+void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vPos = position;
+
+    float n = snoise(position * 3.0) * 0.5 + 0.5; // [0,1]
+    float sea = 0.5;
+
+    // океан плоский, суша — рельеф
+    float h = smoothstep(sea, sea + 0.3, n) * 0.15;
+
+    // радиус сферы + высота
+    vec3 displaced = position * (1.0 + h);
+
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+}
+
+
+
+    
+
+`;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const lights_fs = `
+uniform float uTime;
+    varying vec3 vNormal;
+    varying vec3 vPos;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+vec2 hash2(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(vec2(p.x * p.y, p.y * p.x));
+}
+
+
+
+vec3 hash3(vec3 p) {
+    p = fract(p * vec3(123.34, 456.21, 789.01));
+    p += dot(p, p + 45.32);
+    return fract(vec3(
+        p.x * p.y,
+        p.y * p.z,
+        p.z * p.x
+    ));
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+vec3 sinNoise(vec2 pos, float sc, float time) {
+
+
+	pos/=sc;
+	vec2 cell = floor(pos);
+	vec2 loc = fract(pos);
+
+
+	float mnDist = 100.0;
+	for (int  y=-1; y <= 1; y++) {
+		for (int x=-1; x <= 1; x++) {
+			vec2 p = cell + vec2(x, y);
+			vec2 wp = p + hash2(p);
+
+			float dist = distance(pos, wp);
+			mnDist = min(mnDist, dist);
+		}
+	}
+
+
+	return vec3((sin(mnDist*sc + time)+1.0)/2.0, mnDist, sc);
+}
+
+
+
+
+
+
+
+
+struct ResSinNS {
+	float n;
+	float dist;
+	float scale;
+	vec3 color;
+};
+
+
+
+
+
+
+
+ResSinNS sinNoise3(vec3 pos, float sc, float time) {
+
+
+	pos/=sc;
+	vec3 cell = floor(pos);
+	vec3 loc = fract(pos);
+
+
+	float mnDist = 100.0;
+	vec3 totalClr = vec3(0);
+	for (int  y=-1; y <= 1; y++) {
+		for (int x=-1; x <= 1; x++) {
+			for (int z=-1; z <= 1; z++) {
+				vec3 p = cell + vec3(x, y, z);
+				vec3 wp = p + hash3(p);
+
+				float dist = distance(pos, wp);
+				mnDist = min(mnDist, dist);
+
+
+
+
+
+
+				float atten = 1.0 / (dist*dist + 0.0001);
+
+
+
+				vec3 clr = hash3(wp);
+				totalClr += clr * atten;
+
+			}
+		}
+	}
+
+
+	ResSinNS res;
+
+	res.n = (sin(mnDist*sc)+1.0)/2.0;
+	res.dist = mnDist;
+	res.scale = sc;
+	res.color = totalClr/9.0;
+
+
+
+	return res;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void main(void) {
+
+
+
+	float sc = 80.0;
+	ResSinNS n = sinNoise3(vPos*400.0+uTime*20.0, sc, uTime*140.0);
+
+
+
+	vec3 color = mix(vec3(0), n.color, 1.0-n.n);
+
+
+
+
+	//vec3 cclr = hash3(vec3(cell, 0));
+
+
+	//vec3 color = mix(vec3(0), cclr, n.x) * (1.0-n.y);
+
+
+	gl_FragColor = vec4(color, 1.0);
+}
+
+
+
+
+    
+
+`;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const planets = new THREE.Group();
+scene.add(planets);
+
+
+
+
+
+// --- ШАР + ШЕЙДЕР ---
+function planet(name, fs, vs=default_vs) {
+   const geo = new THREE.SphereGeometry(0.7, 64, 64);
+
+   const mat = new THREE.ShaderMaterial({
+     uniforms: {
+       uTime: { value: 0 }
+     },
+     vertexShader: vs,
+     fragmentShader: fs
+   });
+
+   const sphere = new THREE.Mesh(geo, mat);
+   scene.add(sphere);
+   sphere.position.z = -3;
+   sphere.position.x = 2 * planets.children.length;
+   
+   sphere.name = name;
+   
+
+loader.load('https://unpkg.com/three@0.160.0/examples/fonts/helvetiker_regular.typeface.json', (font) => {
+     const geo = new TextGeometry(name, {
+       font,
+       size: 0.3,
+       height: 0.05,
+       curveSegments: 6,
+  });
+  const mat = new THREE.MeshStandardMaterial({ color: 'rgb(255, 255, 255)',
+  emissive: 0xffffff,
+  emissiveIntensity: 0.4,
 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(0, 1.2, 0);
+  sphere.add(mesh);
+  geo.center();
+});
+   
+   
+   
+   
+   planets.add(sphere);
+   
+   return sphere;
+}
 
-const sphere = new THREE.Mesh(geo, mat);
-scene.add(sphere);
-camera.position.z = 3;
 
 
 
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;   // плавное «доезжание» после отпускания пальца
-controls.dampingFactor = 0.08;
-controls.enablePan = false;      // отключаем сдвиг сцены (для шара не нужен)
-controls.minDistance = 1.5;      // лимиты зума
-controls.maxDistance = 8;
+
+
+
+
+
+const light = new THREE.PointLight(0xffffff, 1, 10);
+planet("Sun", sun_fs).add(light);
+
+
+
+planet("Earth", earth_fs, earth_vs);
+
+planet("Planet of the light", lights_fs);
+
+planets.position.x -= 0;
+
+
+
+
+
+
+//const controls = new OrbitControls(camera, renderer.domElement);
+//controls.enableDamping = true;
+//controls.dampingFactor = 0.08;
+//controls.enablePan = false;
+//controls.minDistance = 1.5;
+//controls.maxDistance = 8;
+
+
+
+
+
+
+var cur = 0;
+const plLen = planets.children.length;
+
+
+
+
+
+function go(n) {
+   cur = (cur + n + plLen) % plLen;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -147,20 +928,32 @@ const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
   const t = clock.getElapsedTime();
+  
+  
+  planets.position.x += (-planets.children[cur].position.x - planets.position.x) * 0.1;
+  
+  
+  
+  
+  
+  
+  
+  const sc = 1 + Math.cos(t*2.4)*0.07;
 
-  sphere.rotation.y += 0.01;
-  sphere.rotation.x += 0.0005;
-  mat.uniforms.uTime.value = t;
+  for (let i=0; i < planets.children.length; i++) {
+     const plt = planets.children[i];
+     
+     plt.rotation.y += 0.01;
+     plt.rotation.x += 0.0005;
+     plt.material.uniforms.uTime.value = t;
 
    
    
    
-   
-   const sc = 0.7 + Math.cos(t*2.4)*0.07;
-   sphere.scale.set(sc, sc, sc);
+     plt.scale.set(sc, sc, sc);
+  }
 
-
-  controls.update();
+  //controls.update();
   renderer.render(scene, camera);
 }
 animate();
@@ -174,13 +967,3 @@ addEventListener('resize', () => {
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
